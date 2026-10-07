@@ -7,6 +7,8 @@ Usage:
     python3 check_connection.py [--dog-ip 192.168.12.1] [--model go1|go2|auto]
 """
 import argparse
+import base64
+import os
 import importlib.util
 import json
 import re
@@ -141,15 +143,27 @@ def check_go2(ip, found):
     report(f"WebRTC signalling port reachable on {ip}", found.get(9991) or found.get(8081),
            hint="Go2 only. Close the Unitree phone app (it holds the single WebRTC slot), "
                 "and make sure the dog is in AP mode with you on its hotspot.")
-    ok = importlib.util.find_spec("go2_webrtc_driver") is not None
-    report("go2_webrtc_connect installed", ok,
-           hint="pip install go2-webrtc-connect   (apt: portaudio19-dev libopus-dev ffmpeg may be needed)")
+    ok = importlib.util.find_spec("unitree_webrtc_connect") is not None
+    report("unitree_webrtc_connect installed", ok,
+           hint="pip install unitree_webrtc_connect  (the old PyPI 'go2-webrtc-connect' "
+                "is outdated and fails on firmware >= 1.1.15; needs apt portaudio19-dev)")
     if found.get(9991):
-        try:  # new-firmware signalling endpoint; any HTTP answer shows it is alive
-            req = urllib.request.Request(f"http://{ip}:9991/con_notify")
-            with urllib.request.urlopen(req, timeout=3) as r:
-                body = r.read(200).decode(errors="replace")
-            report("Go2 signalling HTTP answers on :9991/con_notify", True, body[:80])
+        try:  # any HTTP answer shows signalling is alive; data2 tells us the auth type
+            with urllib.request.urlopen(f"http://{ip}:9991/con_notify", timeout=3) as r:
+                body = r.read().decode(errors="replace")
+            report("Go2 signalling HTTP answers on :9991/con_notify", True)
+            try:
+                data2 = json.loads(base64.b64decode(body)).get("data2")
+            except Exception:
+                data2 = None
+            if str(data2) == "3":
+                has_key = bool(os.environ.get("UNITREE_AES_128_KEY"))
+                report("Per-device AES key present (firmware >= 1.1.15 needs it)", has_key,
+                       "UNITREE_AES_128_KEY is set" if has_key else "",
+                       "Fetch it: unitree-fetch-aes-key --email YOU --password '...' "
+                       "--device-type Go2 --quiet ; then export UNITREE_AES_128_KEY=<key>")
+            else:
+                print(f"       (handshake type data2={data2}: no per-device key needed)")
         except Exception as e:
             report("Go2 signalling HTTP answers on :9991/con_notify", False, str(e),
                    "Port open but no HTTP answer; close other WebRTC clients and retry.")

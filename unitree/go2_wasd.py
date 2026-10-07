@@ -5,7 +5,8 @@ W/S forward/back   A/D turn left/right   Q/E strafe left/right
 SPACE stop         ESC or Ctrl+C stop and exit
 
 Only sends Move / StopMove. No stand up, lie down or other special moves.
-Run:  python unitree/go2_wasd.py
+Run:  python unitree/go2_wasd.py            (firmware < 1.1.15)
+      UNITREE_AES_128_KEY=<32 hex> python unitree/go2_wasd.py   (firmware >= 1.1.15)
 """
 import argparse
 import asyncio
@@ -17,8 +18,8 @@ import termios
 import time
 import tty
 
-from go2_webrtc_driver.constants import DATA_CHANNEL_TYPE, RTC_TOPIC, SPORT_CMD
-from go2_webrtc_driver.webrtc_driver import Go2WebRTCConnection, WebRTCConnectionMethod
+from unitree_webrtc_connect.constants import DATA_CHANNEL_TYPE, RTC_TOPIC, SPORT_CMD
+from unitree_webrtc_connect.webrtc_driver import UnitreeWebRTCConnection, WebRTCConnectionMethod
 
 # ---- Tunable settings (start low!) -------------------------------------
 SPEED_FORWARD = 0.25    # m/s
@@ -93,9 +94,9 @@ async def check_motion_mode(conn):
         print(f"(could not read motion mode: {e})")
 
 
-async def run(ip):
-    method = WebRTCConnectionMethod.LocalAP
-    conn = Go2WebRTCConnection(method, ip=ip) if ip else Go2WebRTCConnection(method)
+async def run(ip, aes_key):
+    conn = UnitreeWebRTCConnection(WebRTCConnectionMethod.LocalAP, ip=ip,
+                                   aes_128_key=aes_key or None)
     print("Connecting to the Go2 (close the Unitree phone app first)...")
     await conn.connect()
     dog = Dog(conn)
@@ -138,8 +139,9 @@ async def run(ip):
         while not quit_evt.is_set():
             now = time.monotonic()
             key = last["key"] if now < last["deadline"] else None
-            if conn.pc.connectionState in ("failed", "closed", "disconnected"):
-                raise ConnectionError(f"connection {conn.pc.connectionState}")
+            state = conn.pc.connectionState if conn.pc else "closed"
+            if state in ("failed", "closed", "disconnected"):
+                raise ConnectionError(f"connection {state}")
             if key:
                 x, y, z = KEYS[key]
                 dog.move(x, y, z)
@@ -167,11 +169,13 @@ async def run(ip):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dog-ip", default="192.168.12.1")
+    ap.add_argument("--aes-key", default=os.environ.get("UNITREE_AES_128_KEY", ""),
+                    help="32-hex per-device key, needed on Go2 firmware >= 1.1.15")
     args = ap.parse_args()
     if not sys.stdin.isatty():
         sys.exit("Run this in an interactive terminal.")
     try:
-        asyncio.run(run(args.dog_ip))
+        asyncio.run(run(args.dog_ip, args.aes_key))
     except KeyboardInterrupt:
         pass
 
