@@ -34,6 +34,13 @@ def tcp_open(ip, port, timeout=2.0):
         return False
 
 
+def is_wsl():
+    try:
+        return "microsoft" in open("/proc/version").read().lower()
+    except OSError:
+        return False
+
+
 def check_wifi_ip():
     try:
         out = subprocess.run(["ip", "-4", "-o", "addr"], capture_output=True,
@@ -47,6 +54,10 @@ def check_wifi_ip():
     if match:
         report("Laptop has a 192.168.12.x address", True,
                ", ".join(f"{a} on {i}" for i, a in match))
+    elif is_wsl():
+        report("Laptop has a 192.168.12.x address", True,
+               "running in WSL2 (NAT via Windows); Windows must be on the dog's WiFi - "
+               "the ping check below confirms the route")
     else:
         report("Laptop has a 192.168.12.x address", False,
                "addresses seen: " + (", ".join(f"{a} ({i})" for i, a in addrs) or "none"),
